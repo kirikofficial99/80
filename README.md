@@ -3,7 +3,7 @@ from telebot import types
 import sqlite3
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 
 TOKEN = '8796002500:AAETEiSc6hH2ymgujQYpcoAY1b_0Yag5his'
@@ -100,6 +100,7 @@ def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         types.KeyboardButton("🌿 Вырастить шишку"),
+        types.KeyboardButton("⏳ Статус роста"),
         types.KeyboardButton("🎒 Инвентарь"),
         types.KeyboardButton("💰 Продать боту"),
         types.KeyboardButton("💨 Курить шишку"),
@@ -121,6 +122,38 @@ def admin_menu():
         types.KeyboardButton("🔙 Главное меню")
     )
     return markup
+
+def check_growth():
+    while True:
+        try:
+            conn2 = sqlite3.connect('durka_weed.db')
+            cur2 = conn2.cursor()
+            cur2.execute("SELECT user_id, grow_end_time FROM users WHERE is_growing = 1")
+            growing = cur2.fetchall()
+            
+            for user in growing:
+                user_id = user[0]
+                end_time = user[1]
+                
+                if time.time() >= end_time:
+                    grams = generate_grams()
+                    
+                    cursor.execute("UPDATE users SET grams = grams + ?, is_growing = 0, total_harvested = total_harvested + ?, grow_start_time = 0, grow_end_time = 0 WHERE user_id = ?", 
+                                 (grams, grams, user_id))
+                    conn.commit()
+                    
+                    try:
+                        bot.send_message(user_id, f"🎉 Шишка выросла! Вес: {grams}гр\nМожно сажать новую!")
+                    except:
+                        pass
+            
+            conn2.close()
+            time.sleep(10)
+        except:
+            time.sleep(30)
+
+growth_thread = threading.Thread(target=check_growth, daemon=True)
+growth_thread.start()
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -168,17 +201,32 @@ def handle_text(message):
             if user[8] == 1:
                 remaining = user[11] - time.time()
                 if remaining > 0:
+                    end_time = datetime.fromtimestamp(user[11])
                     mins = int(remaining // 60)
                     secs = int(remaining % 60)
-                    bot.send_message(message.chat.id, f"⏳ Шишка растёт! Осталось: {mins}м {secs}с")
+                    bot.send_message(message.chat.id, f"⏳ Шишка растёт!\nВырастет: {end_time.strftime('%H:%M:%S')}\nОсталось: {mins}м {secs}с")
                     return
             
             grow_end_time = time.time() + GROW_TIME
+            end_time = datetime.fromtimestamp(grow_end_time)
             
             cursor.execute("UPDATE users SET grow_start_time = ?, is_growing = 1, grow_end_time = ? WHERE user_id = ?", 
                          (time.time(), grow_end_time, user_id))
             conn.commit()
-            bot.send_message(message.chat.id, "🌱 Посадили шишку! Вырастет через 1 час")
+            bot.send_message(message.chat.id, f"🌱 Посадили шишку!\n\n🕐 Вырастет: {end_time.strftime('%H:%M:%S')}\n📅 Дата: {end_time.strftime('%d.%m.%Y')}")
+        
+        elif text == "⏳ Статус роста":
+            if user[8] == 1:
+                remaining = user[11] - time.time()
+                if remaining > 0:
+                    end_time = datetime.fromtimestamp(user[11])
+                    mins = int(remaining // 60)
+                    secs = int(remaining % 60)
+                    bot.send_message(message.chat.id, f"⏳ Статус роста\n\nОсталось: {mins}м {secs}с\nВырастет: {end_time.strftime('%H:%M:%S')}")
+                else:
+                    bot.send_message(message.chat.id, "🎉 Шишка уже выросла! Проверь инвентарь")
+            else:
+                bot.send_message(message.chat.id, "❌ У вас нет растущей шишки")
         
         elif text == "🎒 Инвентарь":
             user = get_user(user_id)
@@ -383,35 +431,6 @@ def process_reset(message):
     except:
         bot.send_message(message.chat.id, "❌ Ошибка")
 
-def check_growth():
-    while True:
-        try:
-            cursor.execute("SELECT user_id, grow_end_time FROM users WHERE is_growing = 1")
-            growing = cursor.fetchall()
-            
-            for user in growing:
-                user_id = user[0]
-                end_time = user[1]
-                
-                if time.time() >= end_time:
-                    grams = generate_grams()
-                    
-                    cursor.execute("UPDATE users SET grams = grams + ?, is_growing = 0, total_harvested = total_harvested + ?, grow_start_time = 0, grow_end_time = 0 WHERE user_id = ?", 
-                                 (grams, grams, user_id))
-                    conn.commit()
-                    
-                    try:
-                        bot.send_message(user_id, f"🎉 Шишка выросла! Вес: {grams}гр")
-                    except:
-                        pass
-            
-            time.sleep(10)
-        except:
-            time.sleep(30)
-
-growth_thread = threading.Thread(target=check_growth, daemon=True)
-growth_thread.start()
-
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     if call.data.startswith("buy_"):
@@ -443,7 +462,7 @@ def handle_callback(call):
         bot.edit_message_text("❌ Отменено", call.message.chat.id, call.message.message_id)
 
 if __name__ == "__main__":
-    print("🌿 Бот запущен!")
+    print("🌿 Бот Дурка Шишки запущен!")
     while True:
         try:
             bot.polling(none_stop=True)
