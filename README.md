@@ -3,7 +3,7 @@ from telebot import types
 import sqlite3
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import threading
 
 TOKEN = '8796002500:AAETEiSc6hH2ymgujQYpcoAY1b_0Yag5his'
@@ -55,10 +55,8 @@ def get_user(user_id):
 
 def create_user(user_id, username):
     if not get_user(user_id):
-        cursor.execute('''
-            INSERT INTO users (user_id, username) 
-            VALUES (?, ?)
-        ''', (user_id, str(username) if username else f"user{user_id}"))
+        cursor.execute("INSERT INTO users (user_id, username) VALUES (?, ?)", 
+                      (user_id, str(username) if username else f"user{user_id}"))
         conn.commit()
 
 def get_current_price():
@@ -143,14 +141,14 @@ def check_growth():
                     conn.commit()
                     
                     try:
-                        bot.send_message(user_id, f"🎉 Шишка выросла! Вес: {grams}гр\nМожно сажать новую!")
+                        bot.send_message(user_id, f"🎉 ШИШКА ВЫРОСЛА!\n\n🌿 Вес: {grams}гр\n💰 По курсу: {int(grams * get_current_price()):,}₽\n\nМожно сажать новую!")
                     except:
                         pass
             
             conn2.close()
-            time.sleep(10)
+            time.sleep(1)
         except:
-            time.sleep(30)
+            time.sleep(5)
 
 growth_thread = threading.Thread(target=check_growth, daemon=True)
 growth_thread.start()
@@ -162,10 +160,7 @@ def start(message):
     create_user(user_id, username)
     bot.send_message(
         message.chat.id,
-        "🌿 *Добро пожаловать в Дурку!*\n\n"
-        "🎮 Выращивай шишки, кури и богатей!\n"
-        "💰 Курс обновляется каждый час\n"
-        "⭐ Кури шишки для повышения уровня",
+        "🌿 *Добро пожаловать в Дурку!*\n\n🎮 Выращивай шишки, кури и богатей!\n⏳ Шишки растут ровно 1 час\n🎲 Вес: от 2 до 10 грамм\n💰 Курс обновляется каждый час",
         parse_mode="Markdown",
         reply_markup=main_menu()
     )
@@ -202,9 +197,24 @@ def handle_text(message):
                 remaining = user[11] - time.time()
                 if remaining > 0:
                     end_time = datetime.fromtimestamp(user[11])
-                    mins = int(remaining // 60)
+                    hours = int(remaining // 3600)
+                    mins = int((remaining % 3600) // 60)
                     secs = int(remaining % 60)
-                    bot.send_message(message.chat.id, f"⏳ Шишка растёт!\nВырастет: {end_time.strftime('%H:%M:%S')}\nОсталось: {mins}м {secs}с")
+                    bot.send_message(
+                        message.chat.id,
+                        f"⏳ *Шишка уже растёт!*\n\n"
+                        f"🕐 Вырастет: *{end_time.strftime('%H:%M:%S')}*\n"
+                        f"📅 Дата: *{end_time.strftime('%d.%m.%Y')}*\n"
+                        f"⏰ Осталось: *{hours}ч {mins}м {secs}с*",
+                        parse_mode="Markdown"
+                    )
+                    return
+                else:
+                    grams = generate_grams()
+                    cursor.execute("UPDATE users SET grams = grams + ?, is_growing = 0, total_harvested = total_harvested + ?, grow_start_time = 0, grow_end_time = 0 WHERE user_id = ?", 
+                                 (grams, grams, user_id))
+                    conn.commit()
+                    bot.send_message(message.chat.id, f"🎉 *ШИШКА ВЫРОСЛА!*\n\n🌿 Вес: *{grams}гр*\n💰 По курсу: *{int(grams * get_current_price()):,}₽*", parse_mode="Markdown")
                     return
             
             grow_end_time = time.time() + GROW_TIME
@@ -213,35 +223,61 @@ def handle_text(message):
             cursor.execute("UPDATE users SET grow_start_time = ?, is_growing = 1, grow_end_time = ? WHERE user_id = ?", 
                          (time.time(), grow_end_time, user_id))
             conn.commit()
-            bot.send_message(message.chat.id, f"🌱 Посадили шишку!\n\n🕐 Вырастет: {end_time.strftime('%H:%M:%S')}\n📅 Дата: {end_time.strftime('%d.%m.%Y')}")
+            bot.send_message(
+                message.chat.id,
+                f"🌱 *Шишка посажена!*\n\n"
+                f"🕐 Вырастет: *{end_time.strftime('%H:%M:%S')}*\n"
+                f"📅 Дата: *{end_time.strftime('%d.%m.%Y')}*\n"
+                f"⏳ Ровно через: *1 час*",
+                parse_mode="Markdown"
+            )
         
         elif text == "⏳ Статус роста":
             if user[8] == 1:
                 remaining = user[11] - time.time()
                 if remaining > 0:
                     end_time = datetime.fromtimestamp(user[11])
-                    mins = int(remaining // 60)
+                    hours = int(remaining // 3600)
+                    mins = int((remaining % 3600) // 60)
                     secs = int(remaining % 60)
-                    bot.send_message(message.chat.id, f"⏳ Статус роста\n\nОсталось: {mins}м {secs}с\nВырастет: {end_time.strftime('%H:%M:%S')}")
+                    progress = int(((GROW_TIME - remaining) / GROW_TIME) * 100)
+                    bar_length = 20
+                    filled = int(bar_length * progress / 100)
+                    bar = "█" * filled + "░" * (bar_length - filled)
+                    
+                    bot.send_message(
+                        message.chat.id,
+                        f"⏳ *СТАТУС ВЫРАЩИВАНИЯ*\n\n"
+                        f"🌱 Прогресс: [{bar}] *{progress}%*\n\n"
+                        f"🕐 Вырастет: *{end_time.strftime('%H:%M:%S')}*\n"
+                        f"📅 Дата: *{end_time.strftime('%d.%m.%Y')}*\n"
+                        f"⏰ Осталось: *{hours}ч {mins}м {secs}с*",
+                        parse_mode="Markdown"
+                    )
                 else:
-                    bot.send_message(message.chat.id, "🎉 Шишка уже выросла! Проверь инвентарь")
+                    bot.send_message(message.chat.id, "🎉 Шишка уже выросла! Нажми '🌿 Вырастить шишку' чтобы собрать!")
             else:
-                bot.send_message(message.chat.id, "❌ У вас нет растущей шишки")
+                bot.send_message(message.chat.id, "❌ У вас нет растущей шишки. Посадите новую!")
         
         elif text == "🎒 Инвентарь":
             user = get_user(user_id)
             cd = get_smoke_cooldown(user_id)
-            cd_text = f"⏳ {cd//60}м {cd%60}с" if cd > 0 else "✅ Готов"
+            if cd > 0:
+                mins = cd // 60
+                secs = cd % 60
+                cd_text = f"⏳ {mins}м {secs}с"
+            else:
+                cd_text = "✅ Готов"
             
             bot.send_message(
                 message.chat.id,
                 f"🎒 *Инвентарь @{user[1]}*\n\n"
-                f"🌿 Шишки: {user[2]:.1f}гр\n"
-                f"💵 Деньги: {user[3]:,}₽\n"
-                f"⭐ Уровень: {user[4]}\n"
-                f"📊 Выращено: {user[9]:.1f}гр\n"
-                f"💰 Продано: {user[10]:.1f}гр\n"
-                f"💨 КД: {cd_text}",
+                f"🌿 Шишки: *{user[2]:.1f}гр*\n"
+                f"💵 Деньги: *{user[3]:,}₽*\n"
+                f"⭐ Уровень: *{user[4]}*\n"
+                f"📊 Выращено: *{user[9]:.1f}гр*\n"
+                f"💰 Продано: *{user[10]:.1f}гр*\n"
+                f"💨 КД курения: {cd_text}",
                 parse_mode="Markdown"
             )
         
@@ -252,7 +288,9 @@ def handle_text(message):
         elif text == "💨 Курить шишку":
             cd = get_smoke_cooldown(user_id)
             if cd > 0:
-                bot.send_message(message.chat.id, f"⏳ Ждите: {cd//60}м {cd%60}с")
+                mins = cd // 60
+                secs = cd % 60
+                bot.send_message(message.chat.id, f"⏳ КД курения! Ждите {mins}м {secs}с")
                 return
             msg = bot.send_message(message.chat.id, "💨 Введите граммы:\nНапример: 1")
             bot.register_next_step_handler(msg, process_smoke)
@@ -260,16 +298,16 @@ def handle_text(message):
         elif text == "👤 Профиль":
             user = get_user(user_id)
             cd = get_smoke_cooldown(user_id)
-            cd_text = "✅ Готов" if cd == 0 else f"⏳ {cd//60}м"
+            cd_text = "✅ Готов" if cd == 0 else f"⏳ {cd//60}м {cd%60}с"
             
             bot.send_message(
                 message.chat.id,
                 f"👤 *Профиль @{user[1]}*\n\n"
-                f"🌿 Шишки: {user[2]:.1f}гр\n"
-                f"💵 Деньги: {user[3]:,}₽\n"
-                f"⭐ Уровень: {user[4]}/100000\n"
-                f"📊 Прогресс: {user[4]/1000:.1f}%\n"
-                f"🌱 Выращено: {user[9]:.1f}гр\n"
+                f"🌿 Шишки: *{user[2]:.1f}гр*\n"
+                f"💵 Деньги: *{user[3]:,}₽*\n"
+                f"⭐ Уровень: *{user[4]}/100000*\n"
+                f"📊 Прогресс: *{user[4]/1000:.1f}%*\n"
+                f"🌱 Выращено: *{user[9]:.1f}гр*\n"
                 f"💨 КД: {cd_text}",
                 parse_mode="Markdown"
             )
@@ -280,12 +318,12 @@ def handle_text(message):
             txt = "🏆 *ТОП-10*\n\n"
             for i, u in enumerate(top, 1):
                 medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
-                txt += f"{medal} @{u[0]}: {u[1]:.1f}гр ({u[2]}лвл)\n"
+                txt += f"{medal} @{u[0]}: *{u[1]:.1f}гр* ({u[2]}лвл)\n"
             bot.send_message(message.chat.id, txt, parse_mode="Markdown")
         
         elif text == "📊 Курс шишек":
             price = get_current_price()
-            bot.send_message(message.chat.id, f"📊 Курс: {price:,}₽/гр\nДиапазон: 1500-2800₽")
+            bot.send_message(message.chat.id, f"📊 *Курс шишек*\n\n💰 1гр = *{price:,}₽*\n📈 Диапазон: 1500₽ - 2800₽\n🔄 Обновляется каждый час", parse_mode="Markdown")
         
         elif text == "💱 Продать игроку":
             msg = bot.send_message(message.chat.id, "💱 Введите: граммы цена @username\nПример: 2.5 5000 @username")
@@ -309,7 +347,7 @@ def handle_text(message):
                 users = cursor.fetchall()
                 txt = "📋 *Игроки:*\n\n"
                 for u in users:
-                    txt += f"@{u[0]}: {u[1]:.1f}гр | {u[2]:,}₽ | {u[3]}лвл\n"
+                    txt += f"@{u[0]}: *{u[1]:.1f}гр* | {u[2]:,}₽ | {u[3]}лвл\n"
                 bot.send_message(message.chat.id, txt, parse_mode="Markdown")
             elif text == "🔙 Главное меню":
                 bot.send_message(message.chat.id, "✅ Меню", reply_markup=main_menu())
@@ -334,9 +372,9 @@ def process_sell_bot(message):
                       (grams, total, grams, user_id))
         conn.commit()
         
-        bot.send_message(message.chat.id, f"✅ Продано {grams}гр за {total:,}₽\n💰 Баланс: {user[3] + total:,}₽")
+        bot.send_message(message.chat.id, f"✅ *Продано!*\n🌿 {grams}гр за *{total:,}₽*\n💰 Баланс: *{user[3] + total:,}₽*", parse_mode="Markdown")
     except:
-        bot.send_message(message.chat.id, "❌ Ошибка!")
+        bot.send_message(message.chat.id, "❌ Ошибка! Введите число")
 
 def process_smoke(message):
     try:
@@ -346,7 +384,9 @@ def process_smoke(message):
         
         cd = get_smoke_cooldown(user_id)
         if cd > 0:
-            bot.send_message(message.chat.id, f"⏳ КД! Ждите {cd//60}м {cd%60}с")
+            mins = cd // 60
+            secs = cd % 60
+            bot.send_message(message.chat.id, f"⏳ КД! Ждите {mins}м {secs}с")
             return
         
         if grams <= 0 or grams > user[2]:
@@ -359,9 +399,9 @@ def process_smoke(message):
                       (grams, new_level, time.time(), user_id))
         conn.commit()
         
-        bot.send_message(message.chat.id, f"💨 Покурили {grams}гр!\n⭐ +{int(grams*3)} уровней\n📊 Уровень: {new_level}/100000")
+        bot.send_message(message.chat.id, f"💨 *Покурили!*\n🌿 Потрачено: *{grams}гр*\n⭐ Уровней: *+{int(grams*3)}*\n📊 Уровень: *{new_level}/100000*\n⏳ КД: 30 минут", parse_mode="Markdown")
     except:
-        bot.send_message(message.chat.id, "❌ Ошибка!")
+        bot.send_message(message.chat.id, "❌ Ошибка! Введите число")
 
 def process_sell_player(message):
     try:
@@ -388,13 +428,13 @@ def process_sell_player(message):
         )
         
         bot.send_message(message.chat.id, f"✅ Предложение @{target} отправлено!")
-        bot.send_message(buyer[0], f"💱 @{user[1]} продаёт {grams}гр за {price:,}₽", reply_markup=markup)
+        bot.send_message(buyer[0], f"💱 @{user[1]} продаёт *{grams}гр* за *{price:,}₽*", parse_mode="Markdown", reply_markup=markup)
     except:
         bot.send_message(message.chat.id, "❌ Формат: 2.5 5000 @user")
 
 def process_ban(message):
     try:
-        username = message.text.replace('@', '')
+        username = message.text.replace('@', '').strip()
         cursor.execute("UPDATE users SET is_banned = 1 WHERE username = ?", (username,))
         conn.commit()
         bot.send_message(message.chat.id, f"✅ @{username} забанен")
@@ -403,7 +443,7 @@ def process_ban(message):
 
 def process_unban(message):
     try:
-        username = message.text.replace('@', '')
+        username = message.text.replace('@', '').strip()
         cursor.execute("UPDATE users SET is_banned = 0 WHERE username = ?", (username,))
         conn.commit()
         bot.send_message(message.chat.id, f"✅ @{username} разбанен")
@@ -413,7 +453,7 @@ def process_unban(message):
 def process_give(message):
     try:
         parts = message.text.split()
-        username = parts[0].replace('@', '')
+        username = parts[0].replace('@', '').strip()
         grams = float(parts[1])
         cursor.execute("UPDATE users SET grams = grams + ? WHERE username = ?", (grams, username))
         conn.commit()
@@ -423,9 +463,8 @@ def process_give(message):
 
 def process_reset(message):
     try:
-        username = message.text.replace('@', '')
-        cursor.execute("UPDATE users SET grams=0, money=0, level=1, is_growing=0, last_smoke_time=0, grow_start_time=0, grow_end_time=0 WHERE username=?", 
-                      (username,))
+        username = message.text.replace('@', '').strip()
+        cursor.execute("UPDATE users SET grams=0, money=0, level=1, is_growing=0, last_smoke_time=0, grow_start_time=0, grow_end_time=0 WHERE username=?", (username,))
         conn.commit()
         bot.send_message(message.chat.id, f"✅ @{username} обнулён")
     except:
@@ -456,16 +495,6 @@ def handle_callback(call):
         conn.commit()
         
         bot.edit_message_text(f"✅ Сделка: {grams}гр за {price:,}₽", call.message.chat.id, call.message.message_id)
-        bot.send_message(seller_id, f"💰 @{buyer[1]} купил {grams}гр за {price:,}₽")
+        bot.send_message(seller_id, f"💰 @{buyer[1]} купил у вас {grams}гр за {price:,}₽")
     
-    elif call.data == "cancel":
-        bot.edit_message_text("❌ Отменено", call.message.chat.id, call.message.message_id)
-
-if __name__ == "__main__":
-    print("🌿 Бот Дурка Шишки запущен!")
-    while True:
-        try:
-            bot.polling(none_stop=True)
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            time.sleep(5)
+    eli
